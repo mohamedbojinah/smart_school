@@ -64,6 +64,11 @@ class User extends Authenticatable
     // العلاقات (Relationships)
     // ===========================
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
 
     public function children()
     {
@@ -155,8 +160,37 @@ class User extends Authenticatable
     }
     
     public function preferences()
-{
-    return $this->hasMany(TeacherPreference::class, 'teacher_id');
-}
+    {
+        return $this->hasMany(TeacherPreference::class, 'teacher_id');
+    }
 
+    public function teacherEvaluations()
+    {
+        return $this->hasMany(\App\Models\TeacherEvaluation::class, 'teacher_id');
+    }
+
+    public function receivedLetters()
+    {
+        return $this->hasMany(\App\Models\OfficialLetter::class, 'recipient_id');
+    }
+
+    public function sentLetters()
+    {
+        return $this->hasMany(\App\Models\OfficialLetter::class, 'sender_id');
+    }
+
+    public function safeboxReports()
+    {
+        return $this->hasMany(\App\Models\SafeBoxReport::class, 'student_id');
+    }
+
+    public function wellbeingPulses()
+    {
+        return $this->hasMany(\App\Models\StudentWellbeingPulse::class, 'student_id');
+    }
+
+    public function portfolio()
+    {
+        return $this->hasOne(\App\Models\StudentPortfolio::class, 'user_id');
+    }
 } 

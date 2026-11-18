@@ -447,12 +447,33 @@ class ParentController extends Controller
         $parentId = Auth::id();
         $children = StudentProfile::whereIn('user_id', function($q) use ($parentId) {
             $q->select('student_id')->from('parent_student')->where('parent_id', $parentId);
-        })->with('user')->get();
+        })->with(['user', 'schoolClass'])->get();
 
-        // تمرير المتغيرات المطلوبة في blade
+        // تمرير المتغيرات والدرجات المطلوبة في blade
         foreach ($children as $child) {
             $child->name = $child->user->name ?? 'غير معروف';
             $child->class_name = $child->schoolClass->name ?? 'غير محدد';
+
+            // جلب الدرجات الفعلية من جدول AssessmentMark المرتبط بالطالب
+            $marksRecords = \App\Models\AssessmentMark::where('student_id', $child->user_id)
+                ->whereNotNull('score')
+                ->with('assessment.subject')
+                ->get();
+
+            $childGrades = collect();
+            foreach ($marksRecords as $mr) {
+                if ($mr->assessment && $mr->assessment->subject) {
+                    $childGrades->push((object)[
+                        'subject_name' => $mr->assessment->subject->name,
+                        'term'         => $mr->assessment->semester ?? 1,
+                        'title'        => $mr->assessment->name ?? 'تقييم',
+                        'score'        => (float)$mr->score,
+                        'max_score'    => (float)($mr->assessment->max_score > 0 ? $mr->assessment->max_score : 100)
+                    ]);
+                }
+            }
+
+            $child->grades = $childGrades;
         }
 
         return view('parent.grades', compact('children'));

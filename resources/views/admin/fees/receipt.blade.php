@@ -60,11 +60,35 @@
         </table>
     </div>
 
+    @php
+        $verifyUrl = \App\Services\QrCodeService::getVerificationUrl('receipt', $payment->id);
+    @endphp
+
+    <div style="margin-top: 25px; padding-top: 20px; border-top: 1px dashed #ddd; display: flex; align-items: center; justify-content: space-between;">
+        <div style="text-align: right;">
+            <p style="margin: 0; font-weight: bold; color: #2e7d32; font-size: 0.95em;">✓ إيصال معتمد وموثق رقمياً</p>
+            <p style="margin: 4px 0 0; font-size: 0.8em; color: #666;">امسح رمز الاستجابة السريعة (QR) للتحقق من صحة السداد والختم الرسمي إلكترونياً.</p>
+        </div>
+        <div id="receipt-qrcode" style="padding: 4px; background: #fff; border: 1px solid #ddd; border-radius: 6px;"></div>
+    </div>
+
     <div class="footer">
         <p>هذا الإيصال مُصدر إلكترونياً من النظام ولا يحتاج إلى توقيع.</p>
         <p>تاريخ الطباعة: {{ now()->format('Y-m-d H:i') }}</p>
     </div>
 </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+    new QRCode(document.getElementById("receipt-qrcode"), {
+        text: "{{ $verifyUrl }}",
+        width: 75,
+        height: 75,
+        colorDark: "#1a237e",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+    });
+</script>
 
 <button onclick="window.print()" class="print-btn">طباعة الإيصال</button>
 

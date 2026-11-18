@@ -12,9 +12,11 @@
 
             <div class="card shadow border-0 rounded-4">
                 <div class="card-body p-5">
-                    <form action="{{ route('admin.subjects.update', $subject->id) }}" method="POST">
+                    <form action="{{ route('admin.subjects.update_by_id', $subject->id) }}" method="POST">
                         @csrf
                         @method('PUT')
+                        <input type="hidden" name="subject_id" value="{{ $subject->id }}">
+                        <input type="hidden" name="grade_id" value="{{ $subject->grade_id }}">
 
                         <div class="mb-4">
                             <label class="form-label fw-bold">اسم المادة</label>

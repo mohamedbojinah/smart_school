@@ -109,14 +109,42 @@
                 </div>
             </div>
             
-            <div class="mt-5 text-center text-muted d-none d-print-block">
-                <p>تم استخراج هذه الشهادة من نظام Smart School إلكترونياً.</p>
-                <div class="mt-4 pt-4 border-top">
-                    <div class="d-flex justify-content-between px-5">
-                        <p>توقيع مدير المدرسة</p>
-                        <p>ختم المدرسة</p>
+            @php
+                $certVerifyUrl = \App\Services\QrCodeService::getVerificationUrl('certificate', $student->id);
+            @endphp
+
+            <div class="mt-4 pt-3 border-top d-flex flex-wrap justify-content-between align-items-center">
+                <div class="text-start">
+                    <div id="cert-qrcode" class="p-1 border rounded bg-white shadow-sm d-inline-block"></div>
+                    <small class="d-block text-muted mt-1 text-center font-monospace" style="font-size: 0.7rem;">امسح للتحقق الرقمي</small>
+                </div>
+                <div class="text-center">
+                    <div class="border border-2 border-primary border-dashed rounded-circle d-inline-flex flex-column align-items-center justify-content-center text-primary" style="width: 80px; height: 80px; transform: rotate(-5deg);">
+                        <i class="fas fa-stamp mb-1"></i>
+                        <span style="font-size: 0.65rem; font-weight: 800;">ختم الاعتماد</span>
                     </div>
                 </div>
+                <div class="text-end">
+                    <p class="mb-1 text-muted small">توقيع إدارة المدرسة</p>
+                    <p class="fw-bold text-dark mb-0">مدير شؤون الطلاب والامتحانات</p>
+                    <small class="text-success fw-bold"><i class="fas fa-check-circle me-1"></i> وثيقة إلكترونية موثقة</small>
+                </div>
+            </div>
+
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+            <script>
+                new QRCode(document.getElementById("cert-qrcode"), {
+                    text: "{{ $certVerifyUrl }}",
+                    width: 70,
+                    height: 70,
+                    colorDark: "#0d6efd",
+                    colorLight: "#ffffff",
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            </script>
+
+            <div class="mt-4 text-center text-muted d-none d-print-block">
+                <p class="small mb-0">تم استخراج هذه الشهادة من نظام Smart School إلكترونياً وهي موثقة برقم تحقق رقمي رسمي.</p>
             </div>
 
         </div>

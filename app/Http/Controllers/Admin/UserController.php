@@ -118,7 +118,7 @@ class UserController extends Controller
         $photoPath = null;
         if ($request->hasFile('photo')) {
             $file = $request->file('photo');
-            $filename = time() . '_' . $file->getClientOriginalName();
+            $filename = time() . '_' . \Illuminate\Support\Str::random(12) . '.' . $file->getClientOriginalExtension();
             $file->move(public_path('uploads/photos'), $filename);
             $photoPath = 'uploads/photos/' . $filename;
         }

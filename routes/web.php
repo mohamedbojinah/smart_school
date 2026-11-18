@@ -28,6 +28,8 @@ use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\SystemManagerController;
 use App\Http\Controllers\AdmissionController;
 use App\Http\Controllers\FeeController;
+use App\Http\Controllers\SafeBoxController;
+use App\Http\Controllers\StudentPortfolioController;
 // ====================================================
 // 1. المصادقة والصفحة الرئيسية
 // ====================================================
@@ -55,6 +57,12 @@ Route::get('/admissions/success', function() {
     return "تم التقديم بنجاح";
 })->name('admissions.success');
 
+// التحقق الرقمي من الوثائق والشهادات (مفتوح للعامة عبر رمز الاستجابة السريعة QR)
+Route::get('/verify/document/{type}/{id}', [App\Http\Controllers\VerificationController::class, 'verify'])->name('document.verify');
+
+// 🌟 سجل الإنجاز الرقمي الموثق للطالب (متاح للعامة وللجامعات عبر الرابط الموثق والـ QR)
+Route::get('/portfolio/{slug}', [StudentPortfolioController::class, 'publicShow'])->name('portfolio.public');
+
 // ====================================================
 // 2. راوتات محمية (تتطلب تسجيل دخول)
 // ====================================================
@@ -67,27 +75,70 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/chat', [\App\Http\Controllers\ChatController::class, 'index'])->name('chat.index');
     Route::get('/chat/messages/{userId}', [\App\Http\Controllers\ChatController::class, 'fetchMessages'])->name('chat.messages');
     Route::post('/chat/send', [\App\Http\Controllers\ChatController::class, 'sendMessage'])->name('chat.send');
+
+    // 🪪 بطاقة الطالب الرقمية الذكية (Digital Student ID Badge)
+    Route::get('/student/id-card/{id?}', [App\Http\Controllers\StudentBadgeController::class, 'show'])->name('student.badge.show');
+
+    // 📷 المسح الذكي للحضور والانصراف عبر الكاميرا والـ QR
+    Route::get('/attendance/scanner', [AttendanceController::class, 'scanner'])->name('attendance.scanner');
+    Route::post('/attendance/scan-qr', [AttendanceController::class, 'scanQr'])->name('attendance.scan_qr');
+
+    // 🤖 مساعد الذكاء الاصطناعي للاختبارات ونظام الإنذار المبكر
+    Route::get('/teacher/ai/quiz-generator', [App\Http\Controllers\AiEducationController::class, 'indexGenerator'])->name('teacher.ai.generator');
+    Route::post('/teacher/ai/generate-questions', [App\Http\Controllers\AiEducationController::class, 'generate'])->name('teacher.ai.generate');
+    Route::post('/teacher/ai/save-to-exam', [App\Http\Controllers\AiEducationController::class, 'saveToExam'])->name('teacher.ai.save_to_exam');
+    Route::get('/admin/ai/early-warning', [App\Http\Controllers\AiEducationController::class, 'earlyWarningDashboard'])->name('admin.ai.early_warning');
     // ==========================================
     // 👔 روابط مدير المدرسة (School Manager)
     // ==========================================
     Route::middleware(['is_manager'])->group(function () {
         
-    // 1. لوحة تحكم المدير
-    Route::get('/manager/dashboard', [ManagerController::class, 'dashboard'])->name('manager.dashboard');
+        // 1. لوحة تحكم المدير التنفيذية
+        Route::get('/manager/dashboard', [ManagerController::class, 'dashboard'])->name('manager.dashboard');
 
-    // 2. صلاحية تعيين مسؤول الدراسة
-    Route::get('/manager/create-admin', [ManagerController::class, 'createStudyOfficer'])->name('manager.create_admin');
-    Route::post('/manager/store-admin', [AdminUserController::class, 'storeStudyOfficer'])->name('manager.store_admin');
+        // 2. مستشار الذكاء الاصطناعي للمدير والإنذار المبكر
+        Route::get('/manager/ai-advisor', [ManagerController::class, 'aiAdvisor'])->name('manager.ai_advisor');
 
-    // 3. صفحات العرض
-    Route::get('/manager/teachers', [ManagerController::class, 'listTeachers'])->name('manager.teachers.index');
+        // 3. تقييم أداء المعلمين والكادر
+        Route::get('/manager/evaluations', [ManagerController::class, 'evaluationsIndex'])->name('manager.evaluations.index');
+        Route::post('/manager/evaluations/{teacher}', [ManagerController::class, 'evaluationStore'])->name('manager.evaluations.store');
 
-    // سجل مراقبة النظام (System Logs)
-    Route::get('/manager/system-logs', [ManagerController::class, 'systemLogs'])->name('manager.system_logs');
-    // مسارات إدارة صلاحيات الأدمن (خاصة بمدير المدرسة فقط)
-    Route::get('/manager/admins/permissions', [AdminOperationController::class, 'manageAdminsPermissions'])->name('manager.admins.permissions');
-    Route::post('/manager/admins/permissions/update', [AdminOperationController::class, 'updateAdminsPermissions'])->name('manager.admins.permissions.update');
+        // 4. الخطابات الرسمية وشهادات الشكر
+        Route::get('/manager/letters', [ManagerController::class, 'officialLettersIndex'])->name('manager.letters.index');
+        Route::get('/manager/letters/create/{teacher?}', [ManagerController::class, 'officialLetterCreate'])->name('manager.letters.create');
+        Route::post('/manager/letters/store', [ManagerController::class, 'officialLetterStore'])->name('manager.letters.store');
+        Route::get('/manager/letters/print/{id}', [ManagerController::class, 'officialLetterPrint'])->name('manager.letters.print');
 
+        // 5. مركز الاعتمادات والقرارات الإدارية
+        Route::get('/manager/approvals', [ManagerController::class, 'approvalsIndex'])->name('manager.approvals.index');
+        Route::post('/manager/approvals', [ManagerController::class, 'approvalStore'])->name('manager.approvals.store');
+        Route::post('/manager/approvals/{id}', [ManagerController::class, 'approvalUpdate'])->name('manager.approvals.update');
+
+        // 6. مركز التعاميم والبلاغات وتنبيهات الطوارئ
+        Route::get('/manager/announcements', [ManagerController::class, 'announcementsIndex'])->name('manager.announcements.index');
+        Route::post('/manager/announcements', [ManagerController::class, 'announcementStore'])->name('manager.announcements.store');
+        Route::post('/manager/announcements/toggle/{id}', [ManagerController::class, 'announcementToggle'])->name('manager.announcements.toggle');
+        Route::delete('/manager/announcements/{id}', [ManagerController::class, 'announcementDestroy'])->name('manager.announcements.destroy');
+
+        // 7. التقرير السنوي الشامل القابل للطباعة
+        Route::get('/manager/reports/comprehensive', [ManagerController::class, 'comprehensiveReport'])->name('manager.reports.comprehensive');
+
+        // 8. صلاحية تعيين مسؤول الدراسة
+        Route::get('/manager/create-admin', [ManagerController::class, 'createStudyOfficer'])->name('manager.create_admin');
+        Route::post('/manager/store-admin', [AdminUserController::class, 'storeStudyOfficer'])->name('manager.store_admin');
+
+        // 9. صفحات العرض
+        Route::get('/manager/teachers', [ManagerController::class, 'listTeachers'])->name('manager.teachers.index');
+
+        // سجل مراقبة النظام (System Logs)
+        Route::get('/manager/system-logs', [ManagerController::class, 'systemLogs'])->name('manager.system_logs');
+        // مسارات إدارة صلاحيات الأدمن (خاصة بمدير المدرسة فقط)
+        Route::get('/manager/admins/permissions', [AdminOperationController::class, 'manageAdminsPermissions'])->name('manager.admins.permissions');
+        Route::post('/manager/admins/permissions/update', [AdminOperationController::class, 'updateAdminsPermissions'])->name('manager.admins.permissions.update');
+
+        // 🛡️ صندوق الأمان المدرسي ومكافحة التنمر
+        Route::get('/manager/safebox', [SafeBoxController::class, 'adminIndex'])->name('manager.safebox.index');
+        Route::post('/manager/safebox/respond/{id}', [SafeBoxController::class, 'adminRespond'])->name('manager.safebox.respond');
     });
     // التوجيه العام للوحة التحكم
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
@@ -144,7 +195,7 @@ Route::middleware(['auth'])->group(function () {
         Route::delete('/admin/subjects/{id}', [AdminSubjectController::class, 'deleteSubject'])->name('admin.subjects.delete');
         // (تعديل المواد)
         Route::get('/admin/subjects/{id}/edit', [AdminSubjectController::class, 'editSubject'])->name('admin.subjects.edit');
-        Route::put('/admin/subjects/{id}', [AdminSubjectController::class, 'updateSubject'])->name('admin.subjects.update');
+        Route::put('/admin/subjects/{id}', [AdminSubjectController::class, 'updateSubject'])->name('admin.subjects.update_by_id');
 
         // 4. توزيع المواد على المعلمين (Assignment)
         // مسار حفظ إسناد المواد للمعلمين
@@ -250,6 +301,10 @@ Route::put('/admin/assign/update', [AdminSubjectController::class, 'updateAssign
         Route::get('/accounting/expenses', [App\Http\Controllers\AccountingController::class, 'expensesIndex'])->name('admin.accounting.expenses');
         Route::post('/accounting/expenses', [App\Http\Controllers\AccountingController::class, 'storeExpense'])->name('admin.accounting.expenses.store');
         Route::get('/accounting/report', [App\Http\Controllers\AccountingController::class, 'profitLossReport'])->name('admin.accounting.report');
+
+        // 🛡️ صندوق الأمان المدرسي ومكافحة التنمر
+        Route::get('/admin/safebox', [SafeBoxController::class, 'adminIndex'])->name('admin.safebox.index');
+        Route::post('/admin/safebox/respond/{id}', [SafeBoxController::class, 'adminRespond'])->name('admin.safebox.respond');
     });
 
     // ====================================================
@@ -259,6 +314,7 @@ Route::put('/admin/assign/update', [AdminSubjectController::class, 'updateAssign
         // الرئيسية والملف
         Route::get('/dashboard', [TeacherController::class, 'dashboard'])->name('teacher.dashboard');
         Route::get('/profile', [TeacherController::class, 'profile'])->name('teacher.profile');
+        Route::get('/official-letters', [TeacherController::class, 'myOfficialLetters'])->name('teacher.letters.index');
         
         // الفصول والطلاب
         Route::get('/classes', [TeacherController::class, 'myClasses'])->name('teacher.classes');
@@ -310,7 +366,7 @@ Route::put('/admin/assign/update', [AdminSubjectController::class, 'updateAssign
 
         // الغياب
         Route::get('/teacher/attendance/{section_id}', [AttendanceController::class, 'index'])->name('teacher.attendance.index');
-        Route::post('/teacher/attendance/store', [AttendanceController::class, 'store'])->name('teacher.attendance.store');
+        Route::post('/teacher/attendance/store/{id?}', [AttendanceController::class, 'store'])->name('teacher.attendance.store');
 
         // إدارة الاختبارات التجريبية (Quizzes)
         Route::get('/subject/{subject_id}/class/{section_id}/quizzes', [TeacherController::class, 'indexQuizzes'])->name('teacher.quizzes.index');
@@ -403,6 +459,17 @@ Route::delete('/teacher/assessments/{id}', [App\Http\Controllers\TeacherControll
 
         // تحميل الملفات الدراسية (Study Materials)
         Route::get('/materials/{id}/download', [StudentController::class, 'downloadMaterial'])->name('student.materials.download');
+
+        // 🛡️ صندوق الأمان المدرسي ومكافحة التنمر ونبض المشاعر
+        Route::get('/safebox', [SafeBoxController::class, 'studentIndex'])->name('student.safebox.index');
+        Route::post('/safebox/report', [SafeBoxController::class, 'submitReport'])->name('student.safebox.report');
+        Route::post('/safebox/pulse', [SafeBoxController::class, 'submitMoodPulse'])->name('student.safebox.pulse');
+
+        // 🌟 سجل الإنجاز الرقمي الموثق (Student Portfolio)
+        Route::get('/portfolio', [StudentPortfolioController::class, 'studentIndex'])->name('student.portfolio.index');
+        Route::post('/portfolio/profile', [StudentPortfolioController::class, 'updateProfile'])->name('student.portfolio.profile.update');
+        Route::post('/portfolio/items', [StudentPortfolioController::class, 'storeItem'])->name('student.portfolio.items.store');
+        Route::delete('/portfolio/items/{id}', [StudentPortfolioController::class, 'destroyItem'])->name('student.portfolio.items.destroy');
     });
 
     // ====================================================
@@ -432,21 +499,11 @@ Route::delete('/teacher/assessments/{id}', [App\Http\Controllers\TeacherControll
         Route::get('/reports/certificate/{studentId}', [ParentController::class, 'comprehensiveReportCard'])->name('parent.reports.certificate');
         Route::get('/reports/progress/{studentId}', [ParentController::class, 'academicProgress'])->name('parent.reports.progress');
         Route::get('/reports/discipline/{studentId}', [ParentController::class, 'disciplineSummary'])->name('parent.reports.discipline');
+        Route::get('/child/{childId}/portfolio', [StudentPortfolioController::class, 'parentView'])->name('parent.child.portfolio');
     });
 
     Route::get('/parent/exams', [App\Http\Controllers\ParentController::class, 'examsCalendar'])->name('parent.exams');
-    // ==========================================
-    // 🏫 مسارات مدير المدرسة (Manager)
-    // ==========================================
-    Route::middleware(['auth', 'role:manager'])->prefix('manager')->group(function () {
-        Route::get('/dashboard', [App\Http\Controllers\ManagerController::class, 'dashboard'])->name('manager.dashboard');
-        Route::get('/teachers', [App\Http\Controllers\ManagerController::class, 'listTeachers'])->name('manager.teachers.index');
-        Route::get('/admin/create', [App\Http\Controllers\ManagerController::class, 'createStudyOfficer'])->name('manager.create_admin');
-        Route::post('/admin/store', [App\Http\Controllers\ManagerController::class, 'storeStudyOfficer'])->name('manager.store_admin');
-        Route::get('/logs', [App\Http\Controllers\ManagerController::class, 'systemLogs'])->name('manager.system_logs');
-        Route::get('/permissions', [App\Http\Controllers\Admin\OperationController::class, 'manageAdminsPermissions'])->name('manager.admins.permissions');
-        Route::post('/permissions', [App\Http\Controllers\Admin\OperationController::class, 'updateAdminsPermissions'])->name('manager.admins.permissions.update');
-    });
+
 
     // ==========================================
 // 🌐 مسارات مدير النظام (Super Admin)
@@ -480,12 +537,11 @@ Route::post('/admin/fees', function() {
     return redirect()->back();
 })->name('admin.fees.store');
 
-Route::post('/teacher/attendance/{id?}', [AttendanceController::class, 'store'])->name('teacher.attendance.store');
 
 Route::post('/parent/leaves', function() {
     \App\Models\LeaveRequest::create([
-        'parent_id' => 1,
-        'type' => 'sick',
+        'parent_id' => auth()->id() ?? 1,
+        'type' => request('type', 'sick'),
         'student_id' => request('student_id'), 
         'reason' => request('reason'), 
         'leave_date' => request('leave_date'),

@@ -1289,4 +1289,17 @@ public function myWeeklySchedule()
 
         return redirect()->back()->with('success', 'تم حذف الملف بنجاح 🗑️');
     }
+
+    /**
+     * استعراض الخطابات وشهادات التقدير الرسمية الموجهة للمعلم من الإدارة
+     */
+    public function myOfficialLetters()
+    {
+        $letters = \App\Models\OfficialLetter::where('recipient_id', auth()->id())
+            ->with(['sender', 'school'])
+            ->latest()
+            ->paginate(15);
+
+        return view('teacher.letters.index', compact('letters'));
+    }
 }

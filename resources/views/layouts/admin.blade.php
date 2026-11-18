@@ -341,6 +341,18 @@
                 <span class="badge bg-danger rounded-pill">{{ $unreadCount }}</span>
             @endif
         </a>
+
+        <hr class="border-secondary mx-3 opacity-25">
+        <div class="px-3 py-1 text-muted text-uppercase fw-bold" style="font-size: 0.72rem; letter-spacing: 1px;">الأنظمة الذكية والتحقق</div>
+        <a href="{{ route('attendance.scanner') }}" class="{{ request()->routeIs('attendance.scanner') ? 'active' : '' }}">
+            <i class="fas fa-qrcode text-warning"></i> المسح الذكي للحضور 📷
+        </a>
+        <a href="{{ route('admin.ai.early_warning') }}" class="{{ request()->routeIs('admin.ai.*') ? 'active' : '' }}">
+            <i class="fas fa-brain-circuit text-danger"></i> الإنذار المبكر للتعثر 🧠
+        </a>
+        <a href="{{ route('admin.safebox.index') }}" class="{{ request()->routeIs('admin.safebox.*') ? 'active' : '' }}">
+            <i class="fas fa-shield-heart text-success"></i> صندوق الأمان ومكافحة التنمر 🛡️
+        </a>
         
         {{-- قسم خاص بمدير المدرسة فقط (Manager) للتحكم في المشرفين --}}
         @if($user->role === 'manager')
@@ -380,6 +392,27 @@
                 </div>
             </div>
         </nav>
+
+        {{-- تنبيه الطوارئ المدرسي العام إن وجد --}}
+        @php
+            $schoolEmergencyAlert = \App\Models\SchoolAnnouncement::where('is_active', true)
+                ->where('priority', 'emergency')
+                ->whereIn('target_role', ['all', 'admin'])
+                ->latest()
+                ->first();
+        @endphp
+        @if($schoolEmergencyAlert)
+        <div class="alert alert-danger shadow-sm border-0 d-flex align-items-center justify-content-between p-3 mb-4 rounded-4">
+            <div class="d-flex align-items-center gap-3">
+                <i class="fas fa-exclamation-triangle fa-2x text-danger"></i>
+                <div>
+                    <h6 class="fw-bold mb-1 text-danger">🚨 نداء طوارئ صادر من مدير المدرسة: {{ $schoolEmergencyAlert->title }}</h6>
+                    <p class="mb-0 text-dark small">{{ $schoolEmergencyAlert->content }}</p>
+                </div>
+            </div>
+            <span class="badge bg-danger px-3 py-2">عاجل وطارئ</span>
+        </div>
+        @endif
 
         @yield('content')
     </div>
