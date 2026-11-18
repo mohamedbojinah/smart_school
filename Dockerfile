@@ -38,11 +38,11 @@ COPY --from=node_builder /app/public/build /var/www/html/public/build
 RUN composer install --no-dev --optimize-autoloader --no-interaction --ignore-platform-reqs
 
 # Set permissions
-RUN chmod -R 775 storage bootstrap/cache
+RUN chmod -R 775 storage bootstrap/cache && mkdir -p database && chmod -R 777 database
 
 # Expose port (Render/Cloud uses $PORT)
 ENV PORT=8000
 EXPOSE 8000
 
 # Start script
-CMD ["sh", "-c", "touch database/database.sqlite && php artisan config:cache && php artisan route:cache && php artisan view:cache && php artisan migrate --force && if [ ! -f storage/installed.lock ]; then php artisan db:seed --force && touch storage/installed.lock; fi && php artisan serve --host=0.0.0.0 --port=${PORT}"]
+CMD ["sh", "-c", "touch database/database.sqlite && chmod 777 database/database.sqlite && php artisan config:cache && php artisan route:cache && php artisan view:cache && php artisan migrate --force && if [ ! -f storage/installed.lock ]; then php artisan db:seed --force && touch storage/installed.lock; fi && php artisan serve --host=0.0.0.0 --port=${PORT:-8000}"]
