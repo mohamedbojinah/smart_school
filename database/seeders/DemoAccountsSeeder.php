@@ -99,10 +99,8 @@ class DemoAccountsSeeder extends Seeder
                 ['user_id' => $student->id],
                 [
                     'class_id' => $class->id,
-                    'grade_id' => $grade->id ?? null,
-                    'student_number' => $sData['number'],
                     'wallet_balance' => $sData['balance'],
-                    'wallet_pin' => Hash::make('1234'),
+                    'wallet_pin' => '1234',
                 ]
             );
         }

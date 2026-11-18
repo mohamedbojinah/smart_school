@@ -19,7 +19,8 @@ class DatabaseSeeder extends Seeder
 {
     public function run()
     {
-        $faker = Faker::create('ar_SA'); // بيانات عربية وهمية
+        $this->call(DemoAccountsSeeder::class);
+        return;
 
         // 0. إنشاء مدرسة لربط المستخدمين بها
         $school = \App\Models\School::firstOrCreate(
