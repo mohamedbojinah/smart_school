@@ -38,6 +38,18 @@
         <a href="{{ route('student.attendance') }}" class="{{ request()->routeIs('student.attendance') ? 'active' : '' }}">
             <i class="fas fa-clipboard-check"></i> سجل الحضور
         </a>
+
+        <a href="{{ route('student.badge.show') }}" target="_blank">
+            <i class="fas fa-id-card text-info"></i> بطاقتي الذكية 🪪
+        </a>
+
+        <a href="{{ route('student.portfolio.index') }}" class="{{ request()->routeIs('student.portfolio.*') ? 'active' : '' }}">
+            <i class="fas fa-star text-warning"></i> سجلي الرقمي الموثق 🌟
+        </a>
+
+        <a href="{{ route('student.safebox.index') }}" class="{{ request()->routeIs('student.safebox.*') ? 'active' : '' }}">
+            <i class="fas fa-shield-alt text-success"></i> صندوق الأمان والمشاعر 🛡️
+        </a>
         
         <a href="{{ route('messages.index') }}" class="{{ request()->routeIs('messages.*') ? 'active' : '' }} d-flex justify-content-between">
             <div><i class="fas fa-comments"></i> تواصل مع المعلمين</div>
@@ -59,6 +71,28 @@
                 </div>
             </div>
         </nav>
+
+        {{-- تنبيه الطوارئ المدرسي العام إن وجد --}}
+        @php
+            $studentEmergencyAlert = \App\Models\SchoolAnnouncement::where('is_active', true)
+                ->where('priority', 'emergency')
+                ->whereIn('target_role', ['all', 'student'])
+                ->latest()
+                ->first();
+        @endphp
+        @if($studentEmergencyAlert)
+        <div class="alert alert-danger shadow-sm border-0 d-flex align-items-center justify-content-between p-3 mb-4 rounded-4">
+            <div class="d-flex align-items-center gap-3">
+                <i class="fas fa-exclamation-triangle fa-2x text-danger"></i>
+                <div>
+                    <h6 class="fw-bold mb-1 text-danger">🚨 نداء طوارئ صادر من إدارة المدرسة: {{ $studentEmergencyAlert->title }}</h6>
+                    <p class="mb-0 text-dark small">{{ $studentEmergencyAlert->content }}</p>
+                </div>
+            </div>
+            <span class="badge bg-danger px-3 py-2">عاجل وطارئ</span>
+        </div>
+        @endif
+
         @yield('content')
     </div>
     

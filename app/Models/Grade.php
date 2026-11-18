@@ -24,7 +24,12 @@ class Grade extends Model
     // العلاقة مع الفصول (اختياري الآن)
     public function classes()
     {
-        return $this->hasMany(SchoolClass::class);
+        return $this->hasMany(SchoolClass::class, 'grade_id');
+    }
+
+    public function schoolClasses()
+    {
+        return $this->hasMany(SchoolClass::class, 'grade_id');
     }
     public function schools()
     {

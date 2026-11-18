@@ -84,6 +84,12 @@
             <i class="fas fa-book-reader"></i> موادي وطلابي
         </a>
         @endif
+
+        @if(in_array(Auth::user()->role, ['admin', 'teacher']))
+        <a href="{{ route('attendance.scanner') }}" class="{{ request()->routeIs('attendance.scanner') ? 'active' : '' }}">
+            <i class="fas fa-qrcode text-warning"></i> المسح الذكي للحضور
+        </a>
+        @endif
     </div>
 
     <div class="content">

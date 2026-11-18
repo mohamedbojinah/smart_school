@@ -32,7 +32,23 @@ Route::post('/admissions/{id}/approve', function(Request $request, $id) {
     return response()->json(['status' => 'success']);
 });
 
-// Manager Settings API
-Route::post('/manager/settings', function(Request $request) {
-    return response()->json(['status' => 'success']);
+// Mobile App Multi-School API Routes
+use App\Http\Controllers\Api\MobileAppApiController;
+
+Route::post('/mobile/login', [MobileAppApiController::class, 'login']);
+Route::get('/mobile/schools', [MobileAppApiController::class, 'getSchools']);
+
+Route::middleware('auth:sanctum')->prefix('mobile')->group(function () {
+    Route::get('/parent/dashboard', [MobileAppApiController::class, 'getParentDashboard']);
+    Route::post('/parent/wallet/update', [MobileAppApiController::class, 'updateWalletSettings']);
+    Route::post('/parent/leaves/submit', [MobileAppApiController::class, 'submitLeaveRequest']);
+    Route::get('/parent/leaves', [MobileAppApiController::class, 'getLeaveRequests']);
+    Route::get('/parent/homeworks', [MobileAppApiController::class, 'getHomeworks']);
+
+    // Notifications & FCM
+    Route::post('/fcm-token', [MobileAppApiController::class, 'registerDeviceToken']);
+    Route::get('/notifications', [MobileAppApiController::class, 'getNotifications']);
+    Route::post('/notifications/{id}/read', [MobileAppApiController::class, 'markNotificationAsRead']);
+    Route::post('/notifications/read-all', [MobileAppApiController::class, 'markAllNotificationsAsRead']);
+    Route::post('/notifications/test', [MobileAppApiController::class, 'sendTestNotification']);
 });

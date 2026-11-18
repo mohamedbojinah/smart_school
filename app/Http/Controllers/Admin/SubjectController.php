@@ -121,8 +121,19 @@ class SubjectController extends Controller
         return redirect()->back()->with('success', 'تم إضافة المادة للصفوف المختارة بنجاح ✅');
     }
 
-    public function updateSubject(Request $request)
+    public function updateSubject(Request $request, $id = null)
     {
+        if ($id && !$request->has('subject_id')) {
+            $request->merge(['subject_id' => $id]);
+        }
+
+        if ($request->has('subject_id') && !$request->has('grade_id')) {
+            $existing = \App\Models\Subject::find($request->subject_id);
+            if ($existing) {
+                $request->merge(['grade_id' => $existing->grade_id]);
+            }
+        }
+
         $request->validate([
             'subject_id' => 'required|exists:subjects,id',
             'name'       => 'required|string|max:255',
