@@ -45,4 +45,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Start script
-CMD ["sh", "-c", "php artisan config:cache && php artisan route:cache && php artisan view:cache && php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=${PORT}"]
+CMD ["sh", "-c", "touch database/database.sqlite && php artisan config:cache && php artisan route:cache && php artisan view:cache && php artisan migrate --force && if [ ! -f storage/installed.lock ]; then php artisan db:seed --force && touch storage/installed.lock; fi && php artisan serve --host=0.0.0.0 --port=${PORT}"]
