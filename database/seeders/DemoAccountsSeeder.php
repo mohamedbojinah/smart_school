@@ -137,6 +137,20 @@ class DemoAccountsSeeder extends Seeder
             );
         }
 
+        // ربط مدير النظام أيضاً بالطلاب التجريبيين لتمكينه من تجربة واجهة ولي الأمر
+        foreach ($studentUsers as $stu) {
+            DB::table('parent_student')->updateOrInsert(
+                [
+                    'parent_id' => $admin->id,
+                    'student_id' => $stu->id,
+                ],
+                [
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]
+            );
+        }
+
         $this->command->info('✅ تم إنشاء وتحديث جميع حسابات الدخول التجريبية بنجاح!');
     }
 }
