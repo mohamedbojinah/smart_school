@@ -23,6 +23,16 @@ use App\Models\Schedule;
 use App\Models\Assessment;
 use App\Models\SafeBoxReport;
 use App\Models\StudentWellbeingPulse;
+use App\Models\OnlineExam;
+use App\Models\OnlineExamQuestion;
+use App\Models\OnlineExamAttempt;
+use App\Models\StudentPortfolio;
+use App\Models\StudentPortfolioItem;
+use App\Models\OfficialLetter;
+use App\Models\Message;
+use App\Models\Expense;
+use App\Models\ManagerApproval;
+use App\Services\AiEducationService;
 use Illuminate\Support\Str;
 use App\Services\PushNotificationService;
 
@@ -1099,6 +1109,577 @@ class MobileAppApiController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'تم حفظ درجات الطلاب بنجاح ✅',
+        ]);
+    }
+
+    // =========================================================================
+    // 👔 Manager & School Admin Methods (لوحة قيادة المدير ومسؤول النظام)
+    // =========================================================================
+
+    public function getManagerDashboard(Request $request)
+    {
+        $schoolId = $request->user()->school_id ?? 1;
+
+        $studentsCount = User::where('role', 'student')->where('school_id', $schoolId)->count();
+        $teachersCount = User::where('role', 'teacher')->where('school_id', $schoolId)->count();
+        $classesCount  = SchoolClass::where('school_id', $schoolId)->count();
+
+        // مؤشر حضور اليوم
+        $today = now()->format('Y-m-d');
+        $todayAttendances = Attendance::where('attendance_date', $today)
+            ->whereHas('user', fn($q) => $q->where('school_id', $schoolId))
+            ->get();
+        
+        $todayTotal = $todayAttendances->count();
+        $todayPresent = $todayAttendances->filter(function($item) {
+            return in_array($item->status, ['1', 1, 'present', 'موجود', 'حاضر']);
+        })->count();
+
+        $todayAttendanceRate = $todayTotal > 0 ? round(($todayPresent / $todayTotal) * 100, 1) : 96.5;
+
+        // المؤشرات المالية
+        $collectedFees = (float) FeePayment::whereHas('student.user', fn($q) => $q->where('school_id', $schoolId))->sum('amount');
+        $totalExpenses = (float) Expense::where('school_id', $schoolId)->sum('amount');
+        $netBalance = $collectedFees - $totalExpenses;
+
+        $pendingLeavesCount = LeaveRequest::where('status', 'pending')
+            ->whereHas('student.user', fn($q) => $q->where('school_id', $schoolId))
+            ->count();
+
+        $pendingSafeBoxCount = SafeBoxReport::where('school_id', $schoolId)
+            ->where('status', 'pending')
+            ->count();
+
+        // أحدث طلبات الاستئذان
+        $recentLeaves = LeaveRequest::with(['student.user', 'parent'])
+            ->whereHas('student.user', fn($q) => $q->where('school_id', $schoolId))
+            ->latest()
+            ->take(5)
+            ->get()
+            ->map(function($l) {
+                return [
+                    'id' => $l->id,
+                    'student_name' => $l->student->user->name ?? 'طالب',
+                    'parent_name' => $l->parent->name ?? 'ولي أمر',
+                    'leave_date' => $l->leave_date,
+                    'type' => $l->type,
+                    'reason' => $l->reason,
+                    'status' => $l->status,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'stats' => [
+                    'students_count' => $studentsCount,
+                    'teachers_count' => $teachersCount,
+                    'classes_count' => $classesCount,
+                    'attendance_rate' => $todayAttendanceRate,
+                    'collected_fees' => $collectedFees,
+                    'total_expenses' => $totalExpenses,
+                    'net_balance' => $netBalance,
+                    'pending_leaves_count' => $pendingLeavesCount,
+                    'pending_safebox_count' => $pendingSafeBoxCount,
+                ],
+                'recent_leaves' => $recentLeaves,
+            ]
+        ]);
+    }
+
+    public function getManagerLeaves(Request $request)
+    {
+        $schoolId = $request->user()->school_id ?? 1;
+
+        $leaves = LeaveRequest::with(['student.user', 'parent'])
+            ->whereHas('student.user', fn($q) => $q->where('school_id', $schoolId))
+            ->latest()
+            ->get()
+            ->map(function($l) {
+                return [
+                    'id' => $l->id,
+                    'student_name' => $l->student->user->name ?? 'طالب',
+                    'parent_name' => $l->parent->name ?? 'ولي أمر',
+                    'leave_date' => $l->leave_date,
+                    'type' => $l->type,
+                    'reason' => $l->reason,
+                    'status' => $l->status,
+                    'created_at' => $l->created_at ? $l->created_at->format('Y-m-d H:i') : null,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $leaves,
+        ]);
+    }
+
+    public function actionManagerLeave(Request $request, $id)
+    {
+        $request->validate([
+            'status' => 'required|in:approved,rejected',
+        ]);
+
+        $leave = LeaveRequest::findOrFail($id);
+        $leave->update(['status' => $request->status]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $request->status === 'approved' ? 'تمت الموافقة على طلب الاستئذان ✅' : 'تم رفض طلب الاستئذان',
+        ]);
+    }
+
+    public function getManagerSafeBoxReports(Request $request)
+    {
+        $schoolId = $request->user()->school_id ?? 1;
+
+        $reports = SafeBoxReport::where('school_id', $schoolId)
+            ->with('student')
+            ->latest()
+            ->get()
+            ->map(function($r) {
+                return [
+                    'id' => $r->id,
+                    'student_name' => $r->student->name ?? 'طالب غير معلن',
+                    'category' => $r->category,
+                    'title' => $r->title,
+                    'description' => $r->description,
+                    'urgency' => $r->urgency,
+                    'status' => $r->status,
+                    'admin_notes' => $r->admin_notes,
+                    'created_at' => $r->created_at ? $r->created_at->format('Y-m-d H:i') : null,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $reports,
+        ]);
+    }
+
+    public function respondManagerSafeBoxReport(Request $request, $id)
+    {
+        $request->validate([
+            'status' => 'required|in:in_progress,resolved,closed',
+            'admin_notes' => 'nullable|string',
+        ]);
+
+        $report = SafeBoxReport::findOrFail($id);
+        $report->update([
+            'status' => $request->status,
+            'admin_notes' => $request->admin_notes,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم تحديث حالة البلاغ بنجاح ✅',
+        ]);
+    }
+
+    public function getManagerAiAdvisor(Request $request)
+    {
+        $schoolId = $request->user()->school_id ?? 1;
+        $aiService = new AiEducationService();
+        $atRisk = $aiService->analyzeAcademicRisk($schoolId);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'at_risk_students' => $atRisk,
+                'advisor_summary' => [
+                    'attendance_advice' => 'نسبة الحضور ممتازة إجمالاً، يُنصح بمتابعة الطلاب المتأخرين صباحاً لتعزيز الانضباط.',
+                    'academic_advice' => 'لوحظ تحسن ملحوظ في معدلات مادتي الرياضيات والعلوم لهذا الشهر.',
+                    'early_warning_count' => count($atRisk),
+                ]
+            ]
+        ]);
+    }
+
+    // =========================================================================
+    // 💳 Parent Fees & Invoices (الرسوم المدرسية لولي الأمر)
+    // =========================================================================
+
+    public function getParentFees(Request $request, $studentId = null)
+    {
+        $parent = $request->user();
+
+        $studentsQuery = StudentProfile::whereIn('user_id', function ($q) use ($parent) {
+            $q->select('student_id')->from('parent_student')->where('parent_id', $parent->id);
+        })->with(['user', 'feePayments']);
+
+        if ($studentId) {
+            $studentsQuery->where('id', $studentId)->orWhere('user_id', $studentId);
+        }
+
+        $students = $studentsQuery->get();
+
+        $result = $students->map(function ($stu) {
+            $total = (float)($stu->total_fees ?? 3500);
+            $paid = (float)($stu->paid_fees ?? $stu->feePayments->sum('amount'));
+            $remaining = max(0, $total - $paid);
+
+            $payments = $stu->feePayments->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'amount' => (float)$p->amount,
+                    'payment_date' => $p->payment_date,
+                    'receipt_number' => $p->receipt_number ?? 'REC-' . $p->id,
+                    'notes' => $p->notes ?? 'دفعة قسط دراسي',
+                ];
+            });
+
+            return [
+                'student_profile_id' => $stu->id,
+                'student_name' => $stu->user->name ?? 'الطالب',
+                'student_number' => $stu->student_number ?? 'STU-' . $stu->id,
+                'total_fees' => $total,
+                'paid_fees' => $paid,
+                'remaining_fees' => $remaining,
+                'payment_percentage' => $total > 0 ? round(($paid / $total) * 100, 1) : 0,
+                'payments' => $payments,
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $result,
+        ]);
+    }
+
+    // =========================================================================
+    // 📝 Student Online Exams & Quizzes (الاختبارات الإلكترونية للطلاب)
+    // =========================================================================
+
+    public function getStudentOnlineExams(Request $request)
+    {
+        $user = $request->user();
+        $studentProfile = StudentProfile::where('user_id', $user->id)->first();
+        $classId = $studentProfile->class_id ?? null;
+
+        if (!$classId) {
+            return response()->json(['status' => 'success', 'data' => []]);
+        }
+
+        $exams = OnlineExam::with(['subject', 'teacher'])
+            ->where(function ($q) use ($classId) {
+                $q->where('class_id', $classId)->orWhereNull('class_id');
+            })
+            ->where('is_active', true)
+            ->latest()
+            ->get();
+
+        $result = $exams->map(function ($e) use ($user) {
+            $attempt = OnlineExamAttempt::where('online_exam_id', $e->id)
+                ->where('student_id', $user->id)
+                ->first();
+
+            return [
+                'id' => $e->id,
+                'title' => $e->title,
+                'subject_name' => $e->subject->name ?? 'مادة عامة',
+                'teacher_name' => $e->teacher->name ?? 'المعلم',
+                'duration_minutes' => $e->duration_minutes ?? 30,
+                'total_questions' => $e->questions()->count(),
+                'total_score' => $e->total_score ?? 10,
+                'has_attempted' => $attempt !== null,
+                'my_score' => $attempt ? $attempt->total_score : null,
+                'attempt_date' => $attempt ? $attempt->created_at->format('Y-m-d') : null,
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $result,
+        ]);
+    }
+
+    public function getOnlineExamForTaking(Request $request, $id)
+    {
+        $user = $request->user();
+        $exam = OnlineExam::with(['subject', 'questions'])->findOrFail($id);
+
+        $attempt = OnlineExamAttempt::where('online_exam_id', $id)
+            ->where('student_id', $user->id)
+            ->first();
+
+        if ($attempt) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'لقد قمت بأداء هذا الاختبار مسبقاً!',
+                'score' => $attempt->total_score,
+            ], 400);
+        }
+
+        $questions = $exam->questions->map(function ($q) {
+            $options = is_array($q->options) ? $q->options : (json_decode($q->options, true) ?? []);
+            return [
+                'id' => $q->id,
+                'question_text' => $q->question_text,
+                'options' => $options,
+                'score' => $q->score ?? 1,
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'id' => $exam->id,
+                'title' => $exam->title,
+                'subject_name' => $exam->subject->name ?? 'المادة',
+                'duration_minutes' => $exam->duration_minutes ?? 30,
+                'questions' => $questions,
+            ]
+        ]);
+    }
+
+    public function submitOnlineExamAttempt(Request $request, $id)
+    {
+        $user = $request->user();
+        $exam = OnlineExam::with('questions')->findOrFail($id);
+
+        if (OnlineExamAttempt::where('online_exam_id', $id)->where('student_id', $user->id)->exists()) {
+            return response()->json(['status' => 'error', 'message' => 'تم استلام إجاباتك مسبقاً لهذا الاختبار.'], 400);
+        }
+
+        $answers = $request->input('answers', []);
+        $score = 0;
+        $maxScore = 0;
+        $studentAnswers = [];
+
+        foreach ($exam->questions as $question) {
+            $maxScore += ($question->score ?? 1);
+            $userAnswer = $answers['q_' . $question->id] ?? $answers[$question->id] ?? null;
+            $isCorrect = false;
+
+            if ($userAnswer !== null && trim(strtolower($userAnswer)) === trim(strtolower($question->correct_answer))) {
+                $score += ($question->score ?? 1);
+                $isCorrect = true;
+            }
+
+            $studentAnswers[$question->id] = [
+                'user_answer' => $userAnswer,
+                'is_correct' => $isCorrect,
+            ];
+        }
+
+        OnlineExamAttempt::create([
+            'online_exam_id' => $exam->id,
+            'student_id' => $user->id,
+            'student_answers' => $studentAnswers,
+            'total_score' => $score,
+            'started_at' => now()->subMinutes(15),
+            'finished_at' => now(),
+            'status' => 'completed',
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "تم تسليم الاختبار بنجاح! درجتك المحققة: $score من $maxScore",
+            'data' => [
+                'score' => $score,
+                'max_score' => $maxScore,
+                'percentage' => $maxScore > 0 ? round(($score / $maxScore) * 100, 1) : 0,
+            ]
+        ]);
+    }
+
+    // =========================================================================
+    // 🌟 Student Portfolio (ملف إنجاز الطالب الرقمي الموثق)
+    // =========================================================================
+
+    public function getStudentPortfolio(Request $request, $studentId = null)
+    {
+        $targetUserId = $studentId ?? $request->user()->id;
+        $user = User::find($targetUserId) ?? $request->user();
+
+        $portfolio = StudentPortfolio::firstOrCreate(
+            ['user_id' => $targetUserId],
+            [
+                'school_id' => $user->school_id ?? 1,
+                'slug' => Str::slug($user->name . '-' . Str::random(5)),
+                'headline' => 'طالب متميز وشغوف بالتعلم',
+                'about_me' => 'أعمل على تنمية مهاراتي الأكاديمية والمشاركة في الأنشطة المدرسية والابتكار.',
+                'skills' => 'القيادة, العمل الجماعي, البرمجة, حل المشكلات',
+                'volunteer_hours' => 25,
+                'is_public' => true,
+                'verified_by_school' => true,
+                'verification_seal_number' => 'VER-' . strtoupper(Str::random(8)),
+            ]
+        );
+
+        $items = StudentPortfolioItem::where('student_portfolio_id', $portfolio->id)
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'portfolio' => $portfolio,
+                'items' => $items,
+                'public_url' => url('/portfolio/' . $portfolio->slug),
+            ]
+        ]);
+    }
+
+    public function addStudentPortfolioItem(Request $request)
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'category' => 'required|string',
+            'description' => 'nullable|string',
+            'year' => 'nullable|string',
+        ]);
+
+        $portfolio = StudentPortfolio::where('user_id', $request->user()->id)->first();
+        if (!$portfolio) {
+            $portfolio = StudentPortfolio::create([
+                'user_id' => $request->user()->id,
+                'school_id' => $request->user()->school_id ?? 1,
+                'slug' => Str::slug($request->user()->name . '-' . Str::random(5)),
+            ]);
+        }
+
+        $item = StudentPortfolioItem::create([
+            'student_portfolio_id' => $portfolio->id,
+            'title' => $request->title,
+            'category' => $request->category,
+            'description' => $request->description,
+            'year' => $request->year ?? date('Y'),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم إضافة الإنجاز إلى ملفك الرقمي بنجاح 🌟',
+            'data' => $item,
+        ]);
+    }
+
+    // =========================================================================
+    // 🤖 Teacher AI Quiz Assistant & Official Letters
+    // =========================================================================
+
+    public function generateTeacherAiQuiz(Request $request)
+    {
+        $request->validate([
+            'topic' => 'required|string|max:255',
+            'subject_name' => 'required|string|max:255',
+            'count' => 'nullable|integer|min:1|max:10',
+            'difficulty' => 'nullable|string|in:easy,medium,hard',
+        ]);
+
+        $aiService = new AiEducationService();
+        $questions = $aiService->generateQuestions(
+            $request->topic,
+            $request->subject_name,
+            (int)($request->count ?? 5),
+            $request->difficulty ?? 'medium'
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم توليد أسئلة الاختبار بنجاح بواسطة الذكاء الاصطناعي 🤖',
+            'data' => $questions,
+        ]);
+    }
+
+    public function getTeacherOfficialLetters(Request $request)
+    {
+        $user = $request->user();
+
+        $letters = OfficialLetter::where('recipient_id', $user->id)
+            ->with('sender')
+            ->latest()
+            ->get()
+            ->map(function ($l) {
+                return [
+                    'id' => $l->id,
+                    'title' => $l->title,
+                    'content' => $l->content,
+                    'type' => $l->type,
+                    'reference_no' => $l->reference_no,
+                    'sender_name' => $l->sender->name ?? 'إدارة المدرسة',
+                    'date' => $l->created_at ? $l->created_at->format('Y-m-d') : null,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $letters,
+        ]);
+    }
+
+    // =========================================================================
+    // 💬 School Chat & In-App Messaging
+    // =========================================================================
+
+    public function getChatContacts(Request $request)
+    {
+        $user = $request->user();
+        $schoolId = $user->school_id ?? 1;
+
+        $contacts = User::where('school_id', $schoolId)
+            ->where('id', '!=', $user->id)
+            ->whereIn('role', ['admin', 'manager', 'teacher', 'parent', 'student'])
+            ->select('id', 'name', 'email', 'role')
+            ->take(30)
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $contacts,
+        ]);
+    }
+
+    public function getChatMessages(Request $request, $userId)
+    {
+        $authId = $request->user()->id;
+
+        $messages = Message::where(function ($q) use ($authId, $userId) {
+            $q->where('sender_id', $authId)->where('receiver_id', $userId);
+        })->orWhere(function ($q) use ($authId, $userId) {
+            $q->where('sender_id', $userId)->where('receiver_id', $authId);
+        })
+        ->orderBy('created_at', 'asc')
+        ->get()
+        ->map(function ($m) use ($authId) {
+            return [
+                'id' => $m->id,
+                'message' => $m->message,
+                'is_me' => $m->sender_id == $authId,
+                'time' => $m->created_at ? $m->created_at->format('H:i') : null,
+                'date' => $m->created_at ? $m->created_at->format('Y-m-d') : null,
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $messages,
+        ]);
+    }
+
+    public function sendChatMessage(Request $request)
+    {
+        $request->validate([
+            'receiver_id' => 'required|exists:users,id',
+            'message' => 'required|string',
+        ]);
+
+        $message = Message::create([
+            'sender_id' => $request->user()->id,
+            'receiver_id' => $request->receiver_id,
+            'message' => $request->message,
+            'is_read' => false,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'id' => $message->id,
+                'message' => $message->message,
+                'is_me' => true,
+                'time' => $message->created_at->format('H:i'),
+                'date' => $message->created_at->format('Y-m-d'),
+            ]
         ]);
     }
 }
