@@ -17,6 +17,10 @@ use App\Models\LeaveRequest;
 use App\Models\SchoolAnnouncement;
 use App\Models\DeviceToken;
 use App\Models\AppNotification;
+use App\Models\SchoolClass;
+use App\Models\Subject;
+use App\Models\Schedule;
+use App\Models\Assessment;
 use App\Services\PushNotificationService;
 
 class MobileAppApiController extends Controller
@@ -470,6 +474,420 @@ class MobileAppApiController extends Controller
             'status' => 'success',
             'message' => 'تم إرسال الإشعار التجريبي بنجاح!',
             'data' => $notification
+        ]);
+    }
+
+    // =========================================================================
+    // 🎓 1. واجهات الطالب (Student Mobile API)
+    // =========================================================================
+
+    /**
+     * لوحة تحكم الطالب (Student Dashboard)
+     */
+    public function getStudentDashboard(Request $request)
+    {
+        $user = $request->user();
+        $studentProfile = StudentProfile::where('user_id', $user->id)
+            ->with(['schoolClass.grade', 'user.school'])
+            ->first();
+
+        if (!$studentProfile) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ملف الطالب غير موجود',
+            ], 404);
+        }
+
+        $class = $studentProfile->schoolClass;
+        $classId = $class ? $class->id : null;
+        $grade = $class ? $class->grade : null;
+        $gradeId = $grade ? $grade->id : null;
+
+        // 1. المواد الدراسية الخاصة بالمرحلة مع المعلمين
+        $subjects = [];
+        if ($gradeId) {
+            $rawSubjects = Subject::where('grade_id', $gradeId)->get();
+            foreach ($rawSubjects as $subj) {
+                $teacherName = null;
+                if ($classId) {
+                    $assignment = DB::table('teacher_subject_section')
+                        ->join('users', 'teacher_subject_section.teacher_id', '=', 'users.id')
+                        ->where('teacher_subject_section.subject_id', $subj->id)
+                        ->where('teacher_subject_section.section_id', $classId)
+                        ->select('users.name')
+                        ->first();
+                    $teacherName = $assignment->name ?? 'مدرس المادة';
+                }
+                $subjects[] = [
+                    'id' => $subj->id,
+                    'name' => $subj->name,
+                    'teacher_name' => $teacherName,
+                    'total_score' => $subj->total_score ?? 100,
+                ];
+            }
+        }
+
+        // 2. جدول الحصص اليومي
+        $daysMap = [
+            0 => 'Sunday',
+            1 => 'Monday',
+            2 => 'Tuesday',
+            3 => 'Wednesday',
+            4 => 'Thursday',
+            5 => 'Friday',
+            6 => 'Saturday',
+        ];
+        $todayEnglish = $daysMap[now()->dayOfWeek] ?? 'Sunday';
+        $todaySchedule = [];
+        if ($classId) {
+            $todaySchedule = Schedule::where('class_id', $classId)
+                ->where('day', $todayEnglish)
+                ->with(['subject', 'teacher'])
+                ->orderBy('period')
+                ->get()
+                ->map(function ($s) {
+                    return [
+                        'period' => $s->period,
+                        'subject_name' => $s->subject->name ?? 'حصة',
+                        'teacher_name' => $s->teacher->name ?? 'معلم',
+                    ];
+                });
+        }
+
+        // 3. آخر الواجبات المدرسية
+        $homeworks = [];
+        if ($classId) {
+            $homeworks = Homework::where('class_id', $classId)
+                ->with(['subject', 'teacher'])
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(function ($h) {
+                    return [
+                        'id' => $h->id,
+                        'title' => $h->title,
+                        'description' => $h->description,
+                        'subject_name' => $h->subject->name ?? 'المادة',
+                        'teacher_name' => $h->teacher->name ?? 'المعلم',
+                        'due_date' => $h->due_date,
+                    ];
+                });
+        }
+
+        // 4. إحصائيات الحضور والغياب
+        $attendances = Attendance::where('student_id', $studentProfile->id)
+            ->orWhere('user_id', $user->id)
+            ->get();
+        $presentDays = $attendances->where('status', 'present')->count();
+        $absentDays = $attendances->where('status', 'absent')->count();
+        $lateDays = $attendances->where('status', 'late')->count();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'student' => [
+                    'id' => $user->id,
+                    'profile_id' => $studentProfile->id,
+                    'name' => $user->name,
+                    'student_number' => $studentProfile->student_number ?? 'STU-' . str_pad($studentProfile->id, 4, '0', STR_PAD_LEFT),
+                    'school_name' => $user->school->name ?? 'المدرسة الذكية',
+                    'grade_name' => $grade->name ?? 'المرحلة الدراسية',
+                    'class_name' => $class ? ($class->name ?? 'فصل ' . $class->section) : 'غير مسجل بفصل',
+                    'wallet_balance' => (float)($studentProfile->wallet_balance ?? 0),
+                    'photo' => $user->photo,
+                ],
+                'attendance_summary' => [
+                    'total' => $attendances->count(),
+                    'present' => $presentDays,
+                    'absent' => $absentDays,
+                    'late' => $lateDays,
+                    'rate' => $attendances->count() > 0 ? round(($presentDays / $attendances->count()) * 100, 1) : 100,
+                ],
+                'subjects' => $subjects,
+                'today_schedule' => $todaySchedule,
+                'recent_homeworks' => $homeworks,
+            ]
+        ]);
+    }
+
+    /**
+     * كشف درجات الطالب وعلاماته التفصيلية
+     */
+    public function getStudentGrades(Request $request)
+    {
+        $user = $request->user();
+        $studentProfile = StudentProfile::where('user_id', $user->id)->first();
+
+        if (!$studentProfile) {
+            return response()->json(['status' => 'error', 'message' => 'ملف الطالب غير موجود'], 404);
+        }
+
+        $marks = AssessmentMark::where('student_id', $studentProfile->id)
+            ->with(['assessment.subject'])
+            ->get();
+
+        $groupedGrades = [];
+        foreach ($marks as $m) {
+            $subjectName = $m->assessment->subject->name ?? 'مادة عامة';
+            if (!isset($groupedGrades[$subjectName])) {
+                $groupedGrades[$subjectName] = [
+                    'subject' => $subjectName,
+                    'total_marks' => 0,
+                    'max_marks' => 0,
+                    'items' => [],
+                ];
+            }
+            $score = (float)$m->score;
+            $maxScore = (float)($m->assessment->max_score ?? 100);
+            $groupedGrades[$subjectName]['total_marks'] += $score;
+            $groupedGrades[$subjectName]['max_marks'] += $maxScore;
+            $groupedGrades[$subjectName]['items'][] = [
+                'title' => $m->assessment->title ?? 'تقييم',
+                'type' => $m->assessment->type ?? 'activity',
+                'score' => $score,
+                'max_score' => $maxScore,
+                'date' => $m->assessment->date ?? null,
+            ];
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => array_values($groupedGrades),
+        ]);
+    }
+
+    /**
+     * جدول الحصص الأسبوعي للطالب
+     */
+    public function getStudentSchedule(Request $request)
+    {
+        $user = $request->user();
+        $studentProfile = StudentProfile::where('user_id', $user->id)->first();
+        $classId = $studentProfile->class_id ?? null;
+
+        if (!$classId) {
+            return response()->json(['status' => 'success', 'data' => []]);
+        }
+
+        $schedules = Schedule::where('class_id', $classId)
+            ->with(['subject', 'teacher'])
+            ->orderBy('period')
+            ->get();
+
+        $byDay = [
+            'Sunday' => ['arabic' => 'الأحد', 'periods' => []],
+            'Monday' => ['arabic' => 'الإثنين', 'periods' => []],
+            'Tuesday' => ['arabic' => 'الثلاثاء', 'periods' => []],
+            'Wednesday' => ['arabic' => 'الأربعاء', 'periods' => []],
+            'Thursday' => ['arabic' => 'الخميس', 'periods' => []],
+        ];
+
+        foreach ($schedules as $s) {
+            if (isset($byDay[$s->day])) {
+                $byDay[$s->day]['periods'][] = [
+                    'period' => $s->period,
+                    'subject_name' => $s->subject->name ?? 'حصة',
+                    'teacher_name' => $s->teacher->name ?? 'معلم',
+                ];
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $byDay,
+        ]);
+    }
+
+    // =========================================================================
+    // 👨‍🏫 2. واجهات المعلم (Teacher Mobile API)
+    // =========================================================================
+
+    /**
+     * لوحة تحكم المعلم (Teacher Dashboard)
+     */
+    public function getTeacherDashboard(Request $request)
+    {
+        $teacher = $request->user();
+
+        // فصول ومواد المعلم
+        $assignments = DB::table('teacher_subject_section')
+            ->join('subjects', 'teacher_subject_section.subject_id', '=', 'subjects.id')
+            ->join('classes', 'teacher_subject_section.section_id', '=', 'classes.id')
+            ->join('grades', 'classes.grade_id', '=', 'grades.id')
+            ->where('teacher_subject_section.teacher_id', $teacher->id)
+            ->select(
+                'subjects.id as subject_id',
+                'subjects.name as subject_name',
+                'grades.name as grade_name',
+                'classes.id as class_id',
+                'classes.name as class_name',
+                'classes.section as class_section'
+            )
+            ->get();
+
+        $classesData = [];
+        foreach ($assignments as $a) {
+            $studentCount = StudentProfile::where('class_id', $a->class_id)->count();
+            $classesData[] = [
+                'class_id' => $a->class_id,
+                'class_name' => $a->class_name ?? ($a->grade_name . ' - ' . $a->class_section),
+                'grade_name' => $a->grade_name,
+                'subject_id' => $a->subject_id,
+                'subject_name' => $a->subject_name,
+                'students_count' => $studentCount,
+            ];
+        }
+
+        // جدول اليوم للمعلم
+        $daysMap = [0 => 'Sunday', 1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday'];
+        $todayEnglish = $daysMap[now()->dayOfWeek] ?? 'Sunday';
+        $todaySchedule = Schedule::where('teacher_id', $teacher->id)
+            ->where('day', $todayEnglish)
+            ->with(['subject', 'schoolClass.grade'])
+            ->orderBy('period')
+            ->get()
+            ->map(function ($s) {
+                return [
+                    'period' => $s->period,
+                    'subject_name' => $s->subject->name ?? 'مادة',
+                    'class_name' => $s->schoolClass ? ($s->schoolClass->grade->name . ' - ' . $s->schoolClass->section) : 'فصل',
+                ];
+            });
+
+        // الواجبات المضافة مؤخراً بواسطة هذا المعلم
+        $homeworks = Homework::where('teacher_id', $teacher->id)
+            ->with(['subject', 'schoolClass'])
+            ->latest()
+            ->take(5)
+            ->get()
+            ->map(function ($h) {
+                return [
+                    'id' => $h->id,
+                    'title' => $h->title,
+                    'description' => $h->description,
+                    'subject_name' => $h->subject->name ?? '',
+                    'class_name' => $h->schoolClass ? ($h->schoolClass->name ?? $h->schoolClass->section) : '',
+                    'due_date' => $h->due_date,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'teacher' => [
+                    'id' => $teacher->id,
+                    'name' => $teacher->name,
+                    'email' => $teacher->email,
+                    'school_name' => $teacher->school->name ?? 'المدرسة الذكية',
+                ],
+                'classes' => $classesData,
+                'today_schedule' => $todaySchedule,
+                'recent_homeworks' => $homeworks,
+            ]
+        ]);
+    }
+
+    /**
+     * قائمة طلاب الفصل لتسجيل الحضور أو رصد الدرجات
+     */
+    public function getTeacherClassStudents(Request $request, $classId)
+    {
+        $students = StudentProfile::where('class_id', $classId)
+            ->with('user')
+            ->get();
+
+        $date = $request->query('date', today()->toDateString());
+
+        // جلب حضور اليوم إن وجد
+        $attendances = Attendance::where('class_id', $classId)
+            ->whereDate('attendance_date', $date)
+            ->get()
+            ->keyBy('student_id');
+
+        $result = [];
+        foreach ($students as $stu) {
+            $user = $stu->user;
+            if (!$user) continue;
+
+            $att = $attendances->get($stu->id);
+            $result[] = [
+                'student_profile_id' => $stu->id,
+                'user_id' => $user->id,
+                'name' => $user->name,
+                'student_number' => $stu->student_number ?? 'STU-' . str_pad($stu->id, 4, '0', STR_PAD_LEFT),
+                'photo' => $user->photo,
+                'today_status' => $att ? $att->status : 'present', // افتراضياً حاضر
+                'today_note' => $att ? $att->note : null,
+            ];
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $result,
+        ]);
+    }
+
+    /**
+     * تسجيل حضور وغياب الفصل من هاتف المعلم
+     */
+    public function saveTeacherAttendance(Request $request)
+    {
+        $request->validate([
+            'class_id' => 'required',
+            'attendance_date' => 'required|date',
+            'records' => 'required|array',
+            'records.*.student_profile_id' => 'required',
+            'records.*.user_id' => 'required',
+            'records.*.status' => 'required|in:present,absent,late',
+        ]);
+
+        foreach ($request->records as $rec) {
+            Attendance::updateOrCreate(
+                [
+                    'class_id' => $request->class_id,
+                    'student_id' => $rec['student_profile_id'],
+                    'attendance_date' => $request->attendance_date,
+                ],
+                [
+                    'user_id' => $rec['user_id'],
+                    'status' => $rec['status'],
+                    'note' => $rec['note'] ?? null,
+                ]
+            );
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم حفظ سجل الحضور والغياب بنجاح ✅',
+        ]);
+    }
+
+    /**
+     * إضافة واجب مدرسي جديد من هاتف المعلم
+     */
+    public function storeTeacherHomework(Request $request)
+    {
+        $request->validate([
+            'class_id' => 'required',
+            'subject_id' => 'required',
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'due_date' => 'required|date',
+        ]);
+
+        $hw = Homework::create([
+            'teacher_id' => $request->user()->id,
+            'class_id' => $request->class_id,
+            'subject_id' => $request->subject_id,
+            'title' => $request->title,
+            'description' => $request->description,
+            'due_date' => $request->due_date,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم نشر الواجب المدرسي بنجاح ✅',
+            'data' => $hw,
         ]);
     }
 }

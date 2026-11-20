@@ -45,6 +45,17 @@ Route::middleware('auth:sanctum')->prefix('mobile')->group(function () {
     Route::get('/parent/leaves', [MobileAppApiController::class, 'getLeaveRequests']);
     Route::get('/parent/homeworks', [MobileAppApiController::class, 'getHomeworks']);
 
+    // 🎓 Student Mobile Routes
+    Route::get('/student/dashboard', [MobileAppApiController::class, 'getStudentDashboard']);
+    Route::get('/student/grades', [MobileAppApiController::class, 'getStudentGrades']);
+    Route::get('/student/schedule', [MobileAppApiController::class, 'getStudentSchedule']);
+
+    // 👨‍🏫 Teacher Mobile Routes
+    Route::get('/teacher/dashboard', [MobileAppApiController::class, 'getTeacherDashboard']);
+    Route::get('/teacher/class/{classId}/students', [MobileAppApiController::class, 'getTeacherClassStudents']);
+    Route::post('/teacher/attendance/save', [MobileAppApiController::class, 'saveTeacherAttendance']);
+    Route::post('/teacher/homeworks/create', [MobileAppApiController::class, 'storeTeacherHomework']);
+
     // Notifications & FCM
     Route::post('/fcm-token', [MobileAppApiController::class, 'registerDeviceToken']);
     Route::get('/notifications', [MobileAppApiController::class, 'getNotifications']);
