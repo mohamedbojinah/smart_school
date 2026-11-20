@@ -205,6 +205,27 @@ class MobileAppApiController extends Controller
     }
 
     /**
+     * 🛡️ فحص أمني: التحقق من أن المستخدم الحالي هو ولي أمر الطالب أو مدير النظام
+     */
+    protected function checkParentStudentAccess($parentUser, $studentUserId): bool
+    {
+        if (!$parentUser || !$studentUserId) {
+            return false;
+        }
+
+        // المدراء والمسؤولون يملكون صلاحية إدارية عليا
+        if (in_array($parentUser->role, ['admin', 'manager', 'super_admin'])) {
+            return true;
+        }
+
+        // فحص جدول الربط بين ولي الأمر والطلاب
+        return DB::table('parent_student')
+            ->where('parent_id', $parentUser->id)
+            ->where('student_id', $studentUserId)
+            ->exists();
+    }
+
+    /**
      * تحديث إعدادات محفظة الابن (PIN والحد اليومي)
      */
     public function updateWalletSettings(Request $request)
@@ -214,7 +235,22 @@ class MobileAppApiController extends Controller
         ]);
 
         $profile = StudentProfile::find($request->student_id)
-            ?? StudentProfile::where('user_id', $request->student_id)->firstOrFail();
+            ?? StudentProfile::where('user_id', $request->student_id)->first();
+
+        if (!$profile) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ملف الطالب غير موجود',
+            ], 404);
+        }
+
+        // 🛡️ فحص أمني: منع التعديل على محفظة طالب لا ينتمي لولي الأمر الحالي
+        if (!$this->checkParentStudentAccess($request->user(), $profile->user_id)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'غير مصرح لك بتعديل بيانات هذا الطالب',
+            ], 403);
+        }
 
         if ($request->has('wallet_pin')) {
             $profile->wallet_pin = $request->wallet_pin;
@@ -252,7 +288,22 @@ class MobileAppApiController extends Controller
         $profile = StudentProfile::find($request->student_id)
             ?? StudentProfile::where('user_id', $request->student_id)->first();
 
-        $studentProfileId = $profile ? $profile->id : $request->student_id;
+        if (!$profile) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ملف الطالب غير موجود',
+            ], 404);
+        }
+
+        // 🛡️ فحص أمني: منع تقديم طلب استئذان لطالب لا ينتمي لولي الأمر الحالي
+        if (!$this->checkParentStudentAccess($request->user(), $profile->user_id)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'غير مصرح لك بتقديم طلب استئذان لهذا الطالب',
+            ], 403);
+        }
+
+        $studentProfileId = $profile->id;
 
         $leave = LeaveRequest::create([
             'parent_id' => $request->user()->id,
