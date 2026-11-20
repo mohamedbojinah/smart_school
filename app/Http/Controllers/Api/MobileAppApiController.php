@@ -21,6 +21,9 @@ use App\Models\SchoolClass;
 use App\Models\Subject;
 use App\Models\Schedule;
 use App\Models\Assessment;
+use App\Models\SafeBoxReport;
+use App\Models\StudentWellbeingPulse;
+use Illuminate\Support\Str;
 use App\Services\PushNotificationService;
 
 class MobileAppApiController extends Controller
@@ -888,6 +891,214 @@ class MobileAppApiController extends Controller
             'status' => 'success',
             'message' => 'تم نشر الواجب المدرسي بنجاح ✅',
             'data' => $hw,
+        ]);
+    }
+
+    // =========================================================================
+    // 🛡️ SafeBox & Wellbeing Methods (صندوق الأمان المدرسي)
+    // =========================================================================
+
+    /**
+     * إرسال نبض المشاعر اليومي للطالب
+     */
+    public function submitStudentMoodPulse(Request $request)
+    {
+        $request->validate([
+            'mood' => 'required|string',
+            'emoji' => 'nullable|string',
+            'note' => 'nullable|string',
+        ]);
+
+        $user = $request->user();
+        $schoolId = $user->school_id ?? 1;
+
+        $pulse = StudentWellbeingPulse::create([
+            'school_id' => $schoolId,
+            'student_id' => $user->id,
+            'mood' => $request->mood,
+            'emoji' => $request->emoji ?? '😊',
+            'note' => $request->note,
+            'week_date' => today(),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'شكراً لمشاركتك! نحن هنا لدعمك دائماً 💙',
+            'data' => $pulse,
+        ]);
+    }
+
+    /**
+     * تقديم بلاغ سري عن تنمر أو مشكلة
+     */
+    public function submitSafeBoxReport(Request $request)
+    {
+        $request->validate([
+            'category' => 'required|string|in:bullying,academic,psychological,family,other',
+            'title' => 'required|string|max:255',
+            'description' => 'required|string',
+            'urgency' => 'nullable|string|in:low,medium,high,critical',
+        ]);
+
+        $user = $request->user();
+        $schoolId = $user->school_id ?? 1;
+
+        $report = SafeBoxReport::create([
+            'school_id' => $schoolId,
+            'student_id' => $user->id,
+            'token' => Str::random(10),
+            'category' => $request->category,
+            'title' => $request->title,
+            'description' => $request->description,
+            'urgency' => $request->urgency ?? 'medium',
+            'status' => 'pending',
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم استلام بلاغك بسرية تامة وسيتم مراجعته من قبل الأخصائي الاجتماعي بعناية 🛡️',
+            'data' => $report,
+        ]);
+    }
+
+    /**
+     * استعراض بلاغات الطالب وردود الأخصائي عليها
+     */
+    public function getStudentSafeBoxReports(Request $request)
+    {
+        $user = $request->user();
+        $reports = SafeBoxReport::where('student_id', $user->id)
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $reports,
+        ]);
+    }
+
+    // =========================================================================
+    // 📝 Teacher Marks & Assessments Methods (رصد درجات المعلم)
+    // =========================================================================
+
+    /**
+     * جلب التقييمات والاختبارات لمادة وفصل معين
+     */
+    public function getTeacherAssessments(Request $request, $classId, $subjectId)
+    {
+        $assessments = Assessment::where('subject_id', $subjectId)
+            ->where(function ($q) use ($classId) {
+                $q->where('class_id', $classId)->orWhereNull('class_id');
+            })
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $assessments,
+        ]);
+    }
+
+    /**
+     * إضافة تقييم / اختبار جديد للفصل
+     */
+    public function createTeacherAssessment(Request $request)
+    {
+        $request->validate([
+            'subject_id' => 'required',
+            'class_id' => 'required',
+            'name' => 'required|string|max:255',
+            'max_score' => 'required|numeric|min:1',
+            'type' => 'nullable|string',
+            'semester' => 'nullable|in:1,2',
+        ]);
+
+        $assessment = Assessment::create([
+            'subject_id' => $request->subject_id,
+            'class_id' => $request->class_id,
+            'name' => $request->name,
+            'title' => $request->name,
+            'max_score' => $request->max_score,
+            'type' => $request->type ?? 'activity',
+            'semester' => $request->semester ?? 1,
+            'date' => today(),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم إنشاء التقييم بنجاح ✅',
+            'data' => $assessment,
+        ]);
+    }
+
+    /**
+     * جلب درجات طلاب الفصل لتقييم معين
+     */
+    public function getAssessmentMarks(Request $request, $assessmentId)
+    {
+        $assessment = Assessment::findOrFail($assessmentId);
+        $classId = $assessment->class_id;
+
+        $students = StudentProfile::when($classId, function ($q) use ($classId) {
+            $q->where('class_id', $classId);
+        })->with('user')->get();
+
+        $existingMarks = AssessmentMark::where('assessment_id', $assessmentId)
+            ->get()
+            ->keyBy('student_id');
+
+        $result = [];
+        foreach ($students as $stu) {
+            $user = $stu->user;
+            if (!$user) continue;
+
+            $markRecord = $existingMarks->get($stu->id) ?? $existingMarks->get($user->id);
+            $result[] = [
+                'student_profile_id' => $stu->id,
+                'user_id' => $user->id,
+                'name' => $user->name,
+                'student_number' => $stu->student_number ?? 'STU-' . str_pad($stu->id, 4, '0', STR_PAD_LEFT),
+                'score' => $markRecord ? (float)$markRecord->score : null,
+                'note' => $markRecord ? $markRecord->note : null,
+            ];
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'assessment' => $assessment,
+                'students' => $result,
+            ]
+        ]);
+    }
+
+    /**
+     * حفظ واعتماد درجات الطلاب لتقييم معين
+     */
+    public function saveAssessmentMarks(Request $request, $assessmentId)
+    {
+        $request->validate([
+            'marks' => 'required|array',
+            'marks.*.student_profile_id' => 'required',
+            'marks.*.score' => 'required|numeric|min:0',
+        ]);
+
+        foreach ($request->marks as $m) {
+            AssessmentMark::updateOrCreate(
+                [
+                    'assessment_id' => $assessmentId,
+                    'student_id' => $m['student_profile_id'],
+                ],
+                [
+                    'score' => $m['score'],
+                    'note' => $m['note'] ?? null,
+                ]
+            );
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم حفظ درجات الطلاب بنجاح ✅',
         ]);
     }
 }
