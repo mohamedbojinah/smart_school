@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\MobileAppApiController;
 
 Route::post('/mobile/login', [MobileAppApiController::class, 'login']);
 Route::get('/mobile/schools', [MobileAppApiController::class, 'getSchools']);
+Route::post('/mobile/admissions/apply', [MobileAppApiController::class, 'submitAdmissionApplication']);
 
 Route::middleware('auth:sanctum')->prefix('mobile')->group(function () {
     // Parent Routes
@@ -84,6 +85,18 @@ Route::middleware('auth:sanctum')->prefix('mobile')->group(function () {
     Route::get('/chat/contacts', [MobileAppApiController::class, 'getChatContacts']);
     Route::get('/chat/{userId}/messages', [MobileAppApiController::class, 'getChatMessages']);
     Route::post('/chat/send', [MobileAppApiController::class, 'sendChatMessage']);
+
+    // 📷 Scanner & POS Routes
+    Route::post('/scanner/gate', [MobileAppApiController::class, 'scanGateQr']);
+    Route::post('/scanner/canteen', [MobileAppApiController::class, 'scanCanteenPurchase']);
+
+    // 📚 Study Materials Routes
+    Route::get('/materials', [MobileAppApiController::class, 'getStudyMaterials']);
+    Route::post('/materials/create', [MobileAppApiController::class, 'createStudyMaterial']);
+
+    // 📝 Admissions Management Routes
+    Route::get('/manager/admissions', [MobileAppApiController::class, 'getManagerAdmissions']);
+    Route::post('/manager/admissions/{id}/action', [MobileAppApiController::class, 'actionManagerAdmission']);
 
     // Notifications & FCM
     Route::post('/fcm-token', [MobileAppApiController::class, 'registerDeviceToken']);

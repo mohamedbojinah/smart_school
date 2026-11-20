@@ -1682,4 +1682,289 @@ class MobileAppApiController extends Controller
             ]
         ]);
     }
+
+    // =========================================================================
+    // 📷 Smart QR Scanner (ماسح الحضور للبوابة والمقصف المدرسي)
+    // =========================================================================
+
+    public function scanGateQr(Request $request)
+    {
+        $raw = $request->input('code') ?? $request->input('student_id');
+        if (!$raw) {
+            return response()->json(['status' => 'error', 'message' => 'يرجى إدخال أو مسح رمز الطالب'], 422);
+        }
+
+        $studentId = null;
+        if (is_numeric($raw)) {
+            $studentId = (int)$raw;
+        } elseif (preg_match('/(?:STD-|ID-|student\/)(\d+)/i', $raw, $matches)) {
+            $studentId = (int)$matches[1];
+        } else {
+            $studentId = (int)$raw;
+        }
+
+        $user = User::with(['studentProfile.schoolClass.grade', 'school'])->find($studentId);
+        if (!$user || $user->role !== 'student') {
+            return response()->json(['status' => 'error', 'message' => 'لم يتم العثور على طالب مسجل بهذا الرمز.'], 404);
+        }
+
+        $today = now()->format('Y-m-d');
+        $profile = $user->studentProfile;
+
+        // التحقق من الحضور المسبق
+        $existing = Attendance::where('user_id', $user->id)
+            ->where('attendance_date', $today)
+            ->first();
+
+        $alreadyPresent = false;
+        if ($existing) {
+            $alreadyPresent = true;
+            $existing->update(['status' => 'present']);
+        } else {
+            Attendance::create([
+                'user_id' => $user->id,
+                'class_id' => $profile->class_id ?? 1,
+                'attendance_date' => $today,
+                'status' => 'present',
+                'notes' => 'تم التسجيل عبر ماسح البوابة الذكي',
+            ]);
+        }
+
+        // إرسال إشعار لحظي لولي الأمر
+        if (!$alreadyPresent) {
+            $parentIds = DB::table('parent_student')->where('student_id', $user->id)->pluck('parent_id');
+            foreach ($parentIds as $parentId) {
+                PushNotificationService::sendToUser(
+                    $parentId,
+                    '📍 إشعار حضور في المدرسة',
+                    "تم تسجيل دخول ابنكم {$user->name} إلى المدرسة بسلام في تمام الساعة " . now()->format('h:i A'),
+                    ['student_id' => (string)$user->id, 'type' => 'attendance'],
+                    'attendance',
+                    $user->school_id,
+                    $user->id
+                );
+            }
+        }
+
+        $className = ($profile && $profile->schoolClass) ? $profile->schoolClass->name : 'غير محدد';
+
+        return response()->json([
+            'status' => 'success',
+            'already_registered' => $alreadyPresent,
+            'message' => $alreadyPresent ? 'الطالب مسجل حضور مسبقاً لهذا اليوم ✅' : 'تم تسجيل حضور الطالب بنجاح ✅',
+            'data' => [
+                'student_id' => $user->id,
+                'student_profile_id' => $profile->id ?? null,
+                'name' => $user->name,
+                'student_number' => $profile->student_number ?? 'STD-' . $user->id,
+                'class_name' => $className,
+                'wallet_balance' => (float)($profile->wallet_balance ?? 0),
+                'scan_time' => now()->format('h:i:s A'),
+                'date' => $today,
+            ]
+        ]);
+    }
+
+    public function scanCanteenPurchase(Request $request)
+    {
+        $request->validate([
+            'code' => 'required',
+            'amount' => 'required|numeric|min:0.1',
+            'notes' => 'nullable|string',
+        ]);
+
+        $raw = $request->code;
+        $studentId = null;
+        if (is_numeric($raw)) {
+            $studentId = (int)$raw;
+        } elseif (preg_match('/(?:STD-|ID-|student\/)(\d+)/i', $raw, $matches)) {
+            $studentId = (int)$matches[1];
+        } else {
+            $studentId = (int)$raw;
+        }
+
+        $user = User::with('studentProfile')->find($studentId);
+        if (!$user || !$user->studentProfile) {
+            return response()->json(['status' => 'error', 'message' => 'لم يتم العثور على محفظة الطالب.'], 404);
+        }
+
+        $profile = $user->studentProfile;
+        $amount = (float)$request->amount;
+
+        if ($profile->wallet_balance < $amount) {
+            return response()->json([
+                'status' => 'error',
+                'message' => "الرصيد غير كافٍ! رصيد الطالب الحالي: {$profile->wallet_balance} د.ل والمطلوب: {$amount} د.ل"
+            ], 400);
+        }
+
+        // خصم المبلغ وتحديث المحفظة
+        $profile->decrement('wallet_balance', $amount);
+
+        // تسجيل العملية
+        \App\Models\WalletTransaction::create([
+            'school_id' => $user->school_id ?? 1,
+            'student_id' => $profile->id,
+            'amount' => $amount,
+            'type' => 'purchase',
+            'description' => $request->notes ?? 'مشتريات من المقصف المدرسي',
+        ]);
+
+        // إشعار ولي الأمر
+        $parentIds = DB::table('parent_student')->where('student_id', $user->id)->pluck('parent_id');
+        foreach ($parentIds as $parentId) {
+            PushNotificationService::sendToUser(
+                $parentId,
+                '🥪 عملية شراء من المقصف',
+                "قام ابنكم {$user->name} بشراء وجبة بقيمة {$amount} د.ل. الرصيد المتبقي: {$profile->wallet_balance} د.ل",
+                ['student_id' => (string)$user->id, 'type' => 'wallet'],
+                'wallet',
+                $user->school_id,
+                $user->id
+            );
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "تمت عملية الشراء بنجاح! الرصيد المتبقي: {$profile->wallet_balance} د.ل ✅",
+            'data' => [
+                'student_name' => $user->name,
+                'amount_paid' => $amount,
+                'remaining_balance' => (float)$profile->wallet_balance,
+            ]
+        ]);
+    }
+
+    // =========================================================================
+    // 📚 Study Materials (المكتبة الرقمية والمذكرات الدراسية)
+    // =========================================================================
+
+    public function getStudyMaterials(Request $request)
+    {
+        $user = $request->user();
+        $schoolId = $user->school_id ?? 1;
+
+        $materials = \App\Models\StudyMaterial::with(['subject', 'teacher'])
+            ->where('school_id', $schoolId)
+            ->latest()
+            ->get()
+            ->map(function ($m) {
+                return [
+                    'id' => $m->id,
+                    'title' => $m->title,
+                    'description' => $m->description,
+                    'subject_name' => $m->subject->name ?? 'مادة دراسية',
+                    'teacher_name' => $m->teacher->name ?? 'معلم المادة',
+                    'file_name' => $m->file_name ?? 'مذكرة تعليمية.pdf',
+                    'file_url' => $m->file_path ? asset('storage/' . $m->file_path) : 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+                    'created_at' => $m->created_at ? $m->created_at->format('Y-m-d') : null,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $materials,
+        ]);
+    }
+
+    public function createStudyMaterial(Request $request)
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'subject_id' => 'required',
+            'description' => 'nullable|string',
+        ]);
+
+        $user = $request->user();
+        $material = \App\Models\StudyMaterial::create([
+            'school_id' => $user->school_id ?? 1,
+            'teacher_id' => $user->id,
+            'subject_id' => $request->subject_id,
+            'title' => $request->title,
+            'description' => $request->description,
+            'file_name' => $request->file_name ?? ($request->title . '.pdf'),
+            'file_path' => $request->file_path ?? 'materials/sample.pdf',
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم رفع ونشر المادة الدراسية بنجاح 📚',
+            'data' => $material,
+        ]);
+    }
+
+    // =========================================================================
+    // 📝 Admissions (التقديم والقبول المدرسي)
+    // =========================================================================
+
+    public function submitAdmissionApplication(Request $request)
+    {
+        $request->validate([
+            'parent_name' => 'required|string|max:255',
+            'parent_email' => 'required|email',
+            'parent_phone' => 'required|string',
+            'student_name' => 'required|string|max:255',
+            'student_dob' => 'required|date',
+            'grade_id' => 'nullable',
+            'notes' => 'nullable|string',
+        ]);
+
+        $admission = \App\Models\Admission::create([
+            'parent_name' => $request->parent_name,
+            'parent_email' => $request->parent_email,
+            'parent_phone' => $request->parent_phone,
+            'student_name' => $request->student_name,
+            'student_dob' => $request->student_dob,
+            'grade_id' => $request->grade_id ?? 1,
+            'status' => 'pending',
+            'notes' => $request->notes,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم تقديم طلب الالتحاق بنجاح! سنتواصل معكم قريباً عبر الهاتف أو البريد الإلكتروني ✅',
+            'data' => $admission,
+        ]);
+    }
+
+    public function getManagerAdmissions(Request $request)
+    {
+        $admissions = \App\Models\Admission::with('grade')
+            ->latest()
+            ->get()
+            ->map(function ($a) {
+                return [
+                    'id' => $a->id,
+                    'student_name' => $a->student_name,
+                    'student_dob' => $a->student_dob,
+                    'parent_name' => $a->parent_name,
+                    'parent_email' => $a->parent_email,
+                    'parent_phone' => $a->parent_phone,
+                    'grade_name' => $a->grade->name ?? 'الصف الدراسي',
+                    'status' => $a->status,
+                    'notes' => $a->notes,
+                    'date' => $a->created_at ? $a->created_at->format('Y-m-d') : null,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $admissions,
+        ]);
+    }
+
+    public function actionManagerAdmission(Request $request, $id)
+    {
+        $request->validate([
+            'status' => 'required|in:approved,rejected',
+        ]);
+
+        $admission = \App\Models\Admission::findOrFail($id);
+        $admission->update(['status' => $request->status]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $request->status === 'approved' ? 'تمت الموافقة على قبول الطالب بنجاح ✅' : 'تم رفض طلب القبول',
+        ]);
+    }
 }
