@@ -98,6 +98,24 @@ Route::middleware('auth:sanctum')->prefix('mobile')->group(function () {
     Route::get('/manager/admissions', [MobileAppApiController::class, 'getManagerAdmissions']);
     Route::post('/manager/admissions/{id}/action', [MobileAppApiController::class, 'actionManagerAdmission']);
 
+    // 🏢 System Manager & Super Admin Routes
+    Route::get('/system/stats', [MobileAppApiController::class, 'getSystemStats']);
+    Route::get('/system/schools', [MobileAppApiController::class, 'getSystemSchools']);
+    Route::post('/system/schools/create', [MobileAppApiController::class, 'createSystemSchool']);
+    Route::post('/system/schools/{schoolId}/users/create', [MobileAppApiController::class, 'createSystemSchoolUser']);
+
+    // 📢 School Announcements & Emergency Broadcasts
+    Route::get('/announcements', [MobileAppApiController::class, 'getAnnouncements']);
+    Route::post('/manager/announcements/create', [MobileAppApiController::class, 'createManagerAnnouncement']);
+    Route::delete('/manager/announcements/{id}', [MobileAppApiController::class, 'deleteManagerAnnouncement']);
+
+    // 💰 Accounting & Expenses Management
+    Route::get('/manager/expenses', [MobileAppApiController::class, 'getManagerExpenses']);
+    Route::post('/manager/expenses/create', [MobileAppApiController::class, 'createManagerExpense']);
+
+    // ⚡ Smart AI Timetable Auto-Generation
+    Route::post('/manager/schedule/auto-generate', [MobileAppApiController::class, 'autoGenerateSchedule']);
+
     // Notifications & FCM
     Route::post('/fcm-token', [MobileAppApiController::class, 'registerDeviceToken']);
     Route::get('/notifications', [MobileAppApiController::class, 'getNotifications']);
