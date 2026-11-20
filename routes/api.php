@@ -49,12 +49,19 @@ Route::middleware('auth:sanctum')->prefix('mobile')->group(function () {
     Route::get('/student/dashboard', [MobileAppApiController::class, 'getStudentDashboard']);
     Route::get('/student/grades', [MobileAppApiController::class, 'getStudentGrades']);
     Route::get('/student/schedule', [MobileAppApiController::class, 'getStudentSchedule']);
+    Route::post('/student/safebox/pulse', [MobileAppApiController::class, 'submitStudentMoodPulse']);
+    Route::post('/student/safebox/report', [MobileAppApiController::class, 'submitSafeBoxReport']);
+    Route::get('/student/safebox/history', [MobileAppApiController::class, 'getStudentSafeBoxReports']);
 
     // 👨‍🏫 Teacher Mobile Routes
     Route::get('/teacher/dashboard', [MobileAppApiController::class, 'getTeacherDashboard']);
     Route::get('/teacher/class/{classId}/students', [MobileAppApiController::class, 'getTeacherClassStudents']);
     Route::post('/teacher/attendance/save', [MobileAppApiController::class, 'saveTeacherAttendance']);
     Route::post('/teacher/homeworks/create', [MobileAppApiController::class, 'storeTeacherHomework']);
+    Route::get('/teacher/class/{classId}/subject/{subjectId}/assessments', [MobileAppApiController::class, 'getTeacherAssessments']);
+    Route::post('/teacher/assessments/create', [MobileAppApiController::class, 'createTeacherAssessment']);
+    Route::get('/teacher/assessment/{assessmentId}/marks', [MobileAppApiController::class, 'getAssessmentMarks']);
+    Route::post('/teacher/assessment/{assessmentId}/marks/save', [MobileAppApiController::class, 'saveAssessmentMarks']);
 
     // Notifications & FCM
     Route::post('/fcm-token', [MobileAppApiController::class, 'registerDeviceToken']);
